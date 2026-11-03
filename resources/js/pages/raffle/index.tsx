@@ -128,24 +128,6 @@ export default function Raffle({
                                 </p>
                             </div>
                         </div>
-                        <nav className="flex items-center gap-2 sm:gap-4">
-                            <Link
-                                href="/admin-raffle-list"
-                                className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-                            >
-                                Manage participants
-                            </Link>
-                            <button
-                                type="button"
-                                onClick={() => router.post('/logout')}
-                                className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-                            >
-                                <LogOut className="size-4" />
-                                <span className="hidden sm:inline">
-                                    Log out
-                                </span>
-                            </button>
-                        </nav>
                     </div>
                 </header>
 
