@@ -17,6 +17,7 @@ Route::middleware('auth')->group(function () {
     Route::put('/admin-raffle-sequence', [RaffleSequenceController::class, 'update'])->name('raffle-sequence.update');
     Route::delete('/admin-raffle-list/clear-all', [RaffleParticipantController::class, 'clearAll'])->name('raffle-participants.clear-all');
     Route::post('/admin-raffle-list/reset-winners', [RaffleParticipantController::class, 'resetWinners'])->name('raffle-participants.reset-winners');
+    Route::post('/admin-raffle-list/{participant}/cancel-win', [RaffleParticipantController::class, 'cancelWin'])->name('raffle-participants.cancel-win');
     Route::put('/admin-raffle-list/{participant}', [RaffleParticipantController::class, 'update'])->name('raffle-participants.update');
     Route::delete('/admin-raffle-list/{participant}', [RaffleParticipantController::class, 'destroy'])->name('raffle-participants.destroy');
     Route::post('/admin-raffle-list/import', [RaffleParticipantController::class, 'import'])->name('raffle-participants.import');

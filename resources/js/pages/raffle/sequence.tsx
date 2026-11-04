@@ -14,7 +14,7 @@ type Props = {
     slots: Slot[];
     completedDraws: number;
     unsequencedWinnerCount: number;
-    sequenceLocked: boolean;
+    completedPrizePositions: number[];
     success: string | null;
     error: string | null;
 };
@@ -46,7 +46,7 @@ export default function Sequence({
     slots,
     completedDraws,
     unsequencedWinnerCount,
-    sequenceLocked,
+    completedPrizePositions,
     success,
     error,
 }: Props) {
@@ -122,16 +122,16 @@ export default function Sequence({
                         <p className="mt-1 text-sm text-slate-600">
                             Spins run in listed order. The initial schedule
                             starts with prize 20 and continues down to prize 1;
-                            new spins are appended to the end.
+                            new spins are appended to the end. Use All to draw
+                            from both assigned Members and Agencies.
                         </p>
-                        {sequenceLocked && (
+                        {completedPrizePositions.length > 0 && (
                             <p
                                 role="status"
                                 className="mt-4 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900"
                             >
-                                The sequence is locked because a draw has
-                                started. Reset the raffle on the participants
-                                page before changing it.
+                                Completed prize slots are read-only. Pending
+                                spins can still be changed at any time.
                             </p>
                         )}
                         {unsequencedWinnerCount > 0 && (
@@ -188,7 +188,9 @@ export default function Sequence({
                                                         event.target.value,
                                                     )
                                                 }
-                                                disabled={sequenceLocked}
+                                                disabled={completedPrizePositions.includes(
+                                                    slot.prize_position,
+                                                )}
                                                 aria-label={`Winner pool for spin ${index + 1}`}
                                                 className="h-10 min-w-36 rounded-lg border border-slate-300 bg-white px-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100"
                                             >
@@ -198,6 +200,7 @@ export default function Sequence({
                                                 <option value="agency">
                                                     Agency
                                                 </option>
+                                                <option value="all">All</option>
                                             </select>
                                         </label>
                                         <button
@@ -212,7 +215,9 @@ export default function Sequence({
                                                 )
                                             }
                                             disabled={
-                                                sequenceLocked ||
+                                                completedPrizePositions.includes(
+                                                    slot.prize_position,
+                                                ) ||
                                                 form.data.slots.length === 1
                                             }
                                             aria-label={`Remove spin ${index + 1}`}
@@ -252,7 +257,6 @@ export default function Sequence({
                                         ])
                                     }
                                     disabled={
-                                        sequenceLocked ||
                                         form.data.slots.length >= 100 ||
                                         Math.max(
                                             ...form.data.slots.map(
@@ -267,7 +271,7 @@ export default function Sequence({
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={sequenceLocked || form.processing}
+                                    disabled={form.processing}
                                     className={`${buttonClass} bg-indigo-600 text-white hover:bg-indigo-700`}
                                 >
                                     <Save className="size-4" />

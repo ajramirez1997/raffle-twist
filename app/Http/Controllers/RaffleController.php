@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\RaffleParticipant;
 use App\Models\RafflePrizeSlot;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
@@ -26,11 +27,9 @@ class RaffleController extends Controller
         return Inertia::render('raffle/index', [
             'raffleNumbers' => $nextSlot === null
                 ? collect()
-                : RaffleParticipant::query()
-                    ->where('already_won', false)
-                    ->where('raffle_identification', $nextSlot->raffle_identification)
-                    ->orderBy('id')
-                    ->pluck('raffle_number'),
+                    : $this->eligibleParticipants($nextSlot->raffle_identification)
+                        ->orderBy('id')
+                        ->pluck('raffle_number'),
             'nextDraw' => $nextSlot === null ? null : [
                 'spin_number' => $completedDraws + 1,
                 'prize_position' => $nextSlot->prize_position,
@@ -66,15 +65,15 @@ class RaffleController extends Controller
                 return ['error' => 'All configured raffle spins have been completed.'];
             }
 
-            $eligible = RaffleParticipant::query()
-                ->where('already_won', false)
-                ->where('raffle_identification', $slot->raffle_identification)
+            $eligible = $this->eligibleParticipants($slot->raffle_identification)
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->get();
 
             if ($eligible->isEmpty()) {
-                $identification = ucfirst($slot->raffle_identification);
+                $identification = $slot->raffle_identification === 'all'
+                    ? 'Member or Agency'
+                    : ucfirst($slot->raffle_identification);
 
                 return [
                     'error' => "No eligible {$identification} participants remain for prize {$slot->prize_position}.",
@@ -111,5 +110,19 @@ class RaffleController extends Controller
             'raffle_identification' => $draw['raffle_identification'],
             'spin_number' => $draw['spin_number'],
         ]);
+    }
+
+    /**
+     * @return Builder<RaffleParticipant>
+     */
+    private function eligibleParticipants(string $identification): Builder
+    {
+        $identifications = $identification === 'all'
+            ? ['member', 'agency']
+            : [$identification];
+
+        return RaffleParticipant::query()
+            ->where('already_won', false)
+            ->whereIn('raffle_identification', $identifications);
     }
 }

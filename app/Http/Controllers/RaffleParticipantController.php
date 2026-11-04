@@ -145,6 +145,36 @@ class RaffleParticipantController extends Controller
         return back()->with('success', 'Raffle winners have been reset. All participants were kept.');
     }
 
+    public function cancelWin(RaffleParticipant $participant): RedirectResponse
+    {
+        $cancelled = DB::transaction(function () use ($participant): bool {
+            DB::table('raffle_draw_locks')->where('id', 1)->lockForUpdate()->firstOrFail();
+
+            $lockedParticipant = RaffleParticipant::query()
+                ->whereKey($participant->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (! $lockedParticipant->already_won) {
+                return false;
+            }
+
+            $lockedParticipant->forceFill([
+                'already_won' => false,
+                'prize_position' => null,
+                'won_at' => null,
+            ])->save();
+
+            return true;
+        }, attempts: 3);
+
+        if (! $cancelled) {
+            return back()->with('error', 'This participant is not currently recorded as a winner.');
+        }
+
+        return back()->with('success', 'Winner status cancelled. The participant is eligible to win again.');
+    }
+
     public function clearAll(): RedirectResponse
     {
         DB::transaction(function (): void {

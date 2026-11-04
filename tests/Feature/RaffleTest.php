@@ -103,6 +103,7 @@ test('raffle reset actions require authentication', function () {
     ]);
 
     $this->post('/admin-raffle-list/reset-winners')->assertRedirect(route('login'));
+    $this->post('/admin-raffle-list/1/cancel-win')->assertRedirect(route('login'));
     $this->delete('/admin-raffle-list/clear-all')->assertRedirect(route('login'));
 
     expect($participant->fresh()->already_won)->toBeTrue();
@@ -205,7 +206,7 @@ test('pre-sequence winners remain saved and are reported separately from configu
         ->assertInertia(fn ($page) => $page
             ->where('completedDraws', 0)
             ->where('unsequencedWinnerCount', 1)
-            ->where('sequenceLocked', false)
+            ->where('completedPrizePositions', [])
         );
 
     expect($winner->fresh()->already_won)->toBeTrue();
@@ -284,11 +285,12 @@ test('a configured category without eligible participants cannot draw another ca
     expect($member->fresh()->already_won)->toBeFalse();
 });
 
-test('sequence changes are rejected after a winner is recorded', function () {
+test('pending sequence slots remain editable after a winner is recorded', function () {
     $this->actingAs(User::factory()->create());
 
     $this->put('/admin-raffle-sequence', [
         'slots' => [
+            ['prize_position' => 2, 'raffle_identification' => 'member'],
             ['prize_position' => 1, 'raffle_identification' => 'member'],
         ],
     ])->assertRedirect();
@@ -300,15 +302,89 @@ test('sequence changes are rejected after a winner is recorded', function () {
 
     $this->put('/admin-raffle-sequence', [
         'slots' => [
+            ['prize_position' => 2, 'raffle_identification' => 'member'],
             ['prize_position' => 1, 'raffle_identification' => 'agency'],
         ],
     ])
         ->assertRedirect()
-        ->assertSessionHas('error', 'Reset the raffle before changing a sequence that already has winners.');
+        ->assertSessionHas('success', 'Raffle sequence updated.');
 
     $this->assertDatabaseHas('raffle_prize_slots', [
-        'prize_position' => 1,
+        'prize_position' => 2,
+        'sequence_order' => 1,
         'raffle_identification' => 'member',
+    ]);
+    $this->assertDatabaseHas('raffle_prize_slots', [
+        'prize_position' => 1,
+        'sequence_order' => 2,
+        'raffle_identification' => 'agency',
+    ]);
+    $this->assertDatabaseHas('raffle_participants', [
+        'raffle_number' => 'MEMBER-1',
+        'already_won' => true,
+        'prize_position' => 2,
+    ]);
+
+    RaffleParticipant::query()->create([
+        'raffle_number' => 'AGENCY-1',
+        'raffle_identification' => 'agency',
+    ]);
+
+    $this->get('/')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('nextDraw.prize_position', 1)
+            ->where('nextDraw.raffle_identification', 'agency')
+            ->where('raffleNumbers', ['AGENCY-1'])
+        );
+
+    $this->post('/raffle/spin')
+        ->assertRedirect('/')
+        ->assertSessionHas('winner.prize_position', 1)
+        ->assertSessionHas('winner.raffle_identification', 'agency');
+});
+
+test('completed prize slots cannot be changed or removed while editing pending slots', function () {
+    $this->actingAs(User::factory()->create());
+
+    $this->put('/admin-raffle-sequence', [
+        'slots' => [
+            ['prize_position' => 2, 'raffle_identification' => 'member'],
+            ['prize_position' => 1, 'raffle_identification' => 'member'],
+        ],
+    ])->assertRedirect();
+    $winner = RaffleParticipant::query()->create([
+        'raffle_number' => 'MEMBER-1',
+        'raffle_identification' => 'member',
+    ]);
+    $this->post('/raffle/spin')->assertRedirect('/');
+    $winner->refresh();
+
+    $this->put('/admin-raffle-sequence', [
+        'slots' => [
+            ['prize_position' => 2, 'raffle_identification' => 'agency'],
+            ['prize_position' => 1, 'raffle_identification' => 'agency'],
+        ],
+    ])
+        ->assertRedirect()
+        ->assertSessionHas('error', 'Prize slots with recorded winners cannot be removed or changed.');
+
+    $this->put('/admin-raffle-sequence', [
+        'slots' => [
+            ['prize_position' => 1, 'raffle_identification' => 'agency'],
+        ],
+    ])
+        ->assertRedirect()
+        ->assertSessionHas('error', 'Prize slots with recorded winners cannot be removed or changed.');
+
+    $this->assertDatabaseHas('raffle_prize_slots', [
+        'prize_position' => 2,
+        'raffle_identification' => 'member',
+    ]);
+    $this->assertDatabaseHas('raffle_participants', [
+        'id' => $winner->id,
+        'already_won' => true,
+        'prize_position' => 2,
     ]);
 });
 
@@ -328,7 +404,56 @@ test('sequence updates reject invalid winner pools', function () {
         ],
     ])->assertSessionHasErrors('slots.1.prize_position');
 
-    $this->assertDatabaseCount('raffle_prize_slots', 20);
+    $this->put('/admin-raffle-sequence', [
+        'slots' => [
+            ['prize_position' => 1, 'raffle_identification' => 'all'],
+        ],
+    ])->assertRedirect()->assertSessionHas('success', 'Raffle sequence updated.');
+
+    $this->assertDatabaseCount('raffle_prize_slots', 1);
+});
+
+test('all winner pool draws from members and agencies but excludes unassigned participants', function () {
+    $this->actingAs(User::factory()->create());
+
+    $this->put('/admin-raffle-sequence', [
+        'slots' => [
+            ['prize_position' => 2, 'raffle_identification' => 'all'],
+            ['prize_position' => 1, 'raffle_identification' => 'all'],
+        ],
+    ])->assertRedirect();
+
+    RaffleParticipant::query()->create([
+        'raffle_number' => 'MEMBER-1',
+        'raffle_identification' => 'member',
+    ]);
+    RaffleParticipant::query()->create([
+        'raffle_number' => 'AGENCY-1',
+        'raffle_identification' => 'agency',
+    ]);
+    $unassigned = RaffleParticipant::query()->create([
+        'raffle_number' => 'UNASSIGNED-1',
+    ]);
+
+    $this->get('/')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('raffleNumbers', ['MEMBER-1', 'AGENCY-1'])
+            ->where('nextDraw.raffle_identification', 'all')
+        );
+
+    $this->post('/raffle/spin')->assertRedirect('/');
+    $this->post('/raffle/spin')->assertRedirect('/');
+
+    $this->assertDatabaseHas('raffle_participants', [
+        'raffle_number' => 'MEMBER-1',
+        'already_won' => true,
+    ]);
+    $this->assertDatabaseHas('raffle_participants', [
+        'raffle_number' => 'AGENCY-1',
+        'already_won' => true,
+    ]);
+    expect($unassigned->fresh()->already_won)->toBeFalse();
 });
 
 test('new spins append after existing positions and preserve the original draw order', function () {
@@ -486,6 +611,60 @@ test('resetting the raffle clears winner state but keeps participant identificat
         ->and($winner->fresh()->prize_position)->toBeNull()
         ->and($winner->fresh()->raffle_identification)->toBe('agency')
         ->and($regular->fresh()->already_won)->toBeFalse();
+});
+
+test('admin can cancel a win and the participant can be drawn again for the freed prize', function () {
+    $this->actingAs(User::factory()->create());
+
+    $winner = RaffleParticipant::query()->create([
+        'raffle_number' => 'WINNER-1',
+        'raffle_identification' => 'member',
+        'already_won' => true,
+        'prize_position' => 20,
+        'won_at' => now(),
+    ]);
+
+    $this->post("/admin-raffle-list/{$winner->id}/cancel-win")
+        ->assertRedirect()
+        ->assertSessionHas('success', 'Winner status cancelled. The participant is eligible to win again.');
+
+    $this->assertDatabaseHas('raffle_participants', [
+        'id' => $winner->id,
+        'already_won' => false,
+        'prize_position' => null,
+        'won_at' => null,
+    ]);
+
+    $this->get('/')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('nextDraw.prize_position', 20)
+            ->where('raffleNumbers', ['WINNER-1'])
+        );
+
+    $this->post('/raffle/spin')
+        ->assertRedirect('/')
+        ->assertSessionHas('winner.prize_position', 20)
+        ->assertSessionHas('winner.raffle_number', 'WINNER-1');
+});
+
+test('cancelling a win for a participant who has not won makes no changes', function () {
+    $this->actingAs(User::factory()->create());
+    $participant = RaffleParticipant::query()->create([
+        'raffle_number' => 'MEMBER-1',
+        'raffle_identification' => 'member',
+    ]);
+
+    $this->post("/admin-raffle-list/{$participant->id}/cancel-win")
+        ->assertRedirect()
+        ->assertSessionHas('error', 'This participant is not currently recorded as a winner.');
+
+    $this->assertDatabaseHas('raffle_participants', [
+        'id' => $participant->id,
+        'already_won' => false,
+        'prize_position' => null,
+        'won_at' => null,
+    ]);
 });
 
 test('clearing the raffle removes all participants and winner records', function () {

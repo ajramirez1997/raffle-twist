@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import {
     clearAll as clearAllParticipants,
+    cancelWin,
     destroy as destroyParticipant,
     index as participantIndex,
     importMethod as importParticipants,
@@ -220,12 +221,36 @@ function ParticipantRow({ participant }: { participant: Participant }) {
                                     </button>
                                 </>
                             ) : (
-                                <span className="px-2 text-xs font-medium text-slate-400">
-                                    Winner record
-                                    {participant.prize_position !== null
-                                        ? ` · Prize #${participant.prize_position}`
-                                        : ''}
-                                </span>
+                                <>
+                                    <span className="px-2 text-xs font-medium text-slate-400">
+                                        Winner record
+                                        {participant.prize_position !== null
+                                            ? ` · Prize #${participant.prize_position}`
+                                            : ''}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (
+                                                window.confirm(
+                                                    `Cancel the win for ${participant.raffle_number}? They will become eligible to win again.`,
+                                                )
+                                            ) {
+                                                router.post(
+                                                    cancelWin.url(
+                                                        participant.id,
+                                                    ),
+                                                    {},
+                                                    { preserveScroll: true },
+                                                );
+                                            }
+                                        }}
+                                        className={`${buttonClass} bg-amber-50 text-amber-800 hover:bg-amber-100`}
+                                    >
+                                        <RotateCcw className="size-3.5" />
+                                        Cancel win
+                                    </button>
+                                </>
                             )}
                         </>
                     )}
