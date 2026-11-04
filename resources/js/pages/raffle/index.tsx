@@ -292,7 +292,7 @@ export default function Raffle({ raffleNumbers, nextDraw, flash }: Props) {
                                         (number, index) => (
                                             <span
                                                 key={`${reelTick}-${index}`}
-                                                className="flex h-1/2 w-full shrink-0 items-center justify-center px-3 text-center font-mono text-[clamp(3.5rem,15vw,14rem)] leading-none font-bold tracking-[0.08em] break-all text-amber-100"
+                                                className="flex h-1/2 w-full shrink-0 items-center justify-center px-3 text-center font-raffle-number text-[clamp(3.5rem,15vw,14rem)] leading-none font-bold tracking-[0.08em] break-all text-amber-100"
                                             >
                                                 {number}
                                             </span>
@@ -302,7 +302,7 @@ export default function Raffle({ raffleNumbers, nextDraw, flash }: Props) {
                             ) : (
                                 <span
                                     aria-live="polite"
-                                    className={`absolute inset-0 z-10 flex items-center justify-center px-3 text-center font-mono text-[clamp(3.5rem,15vw,14rem)] leading-none font-bold tracking-[0.08em] break-all text-amber-100 ${winnerNumber ? 'drop-shadow-[0_0_24px_rgba(255,211,115,0.65)]' : ''}`}
+                                    className={`absolute inset-0 z-10 flex items-center justify-center px-3 text-center font-raffle-number text-[clamp(3.5rem,15vw,14rem)] leading-none font-bold tracking-[0.08em] break-all text-amber-100 ${winnerNumber ? 'drop-shadow-[0_0_24px_rgba(255,211,115,0.65)]' : ''}`}
                                 >
                                     {displayNumber}
                                 </span>
