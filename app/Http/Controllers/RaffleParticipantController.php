@@ -20,7 +20,7 @@ class RaffleParticipantController extends Controller
         $filters = $request->validate([
             'search' => ['nullable', 'string', 'max:255'],
             'already_won' => ['nullable', 'in:yes,no'],
-            'expected_to_win' => ['nullable', 'in:yes,no'],
+            'raffle_identification' => ['nullable', 'in:member,agency,unassigned'],
         ]);
 
         $query = RaffleParticipant::query()->orderBy('id');
@@ -29,18 +29,25 @@ class RaffleParticipantController extends Controller
             $query->where('raffle_number', 'like', '%'.trim($filters['search']).'%');
         }
 
-        foreach (['already_won', 'expected_to_win'] as $filter) {
-            if (filled($filters[$filter] ?? null)) {
-                $query->where($filter, $filters[$filter] === 'yes');
-            }
+        if (filled($filters['already_won'] ?? null)) {
+            $query->where('already_won', $filters['already_won'] === 'yes');
+        }
+
+        if (($filters['raffle_identification'] ?? null) === 'unassigned') {
+            $query->whereNull('raffle_identification');
+        } elseif (filled($filters['raffle_identification'] ?? null)) {
+            $query->where('raffle_identification', $filters['raffle_identification']);
         }
 
         return Inertia::render('raffle/participants', [
             'participants' => $query->paginate(15)->withQueryString(),
+            'unassignedCount' => RaffleParticipant::query()
+                ->whereNull('raffle_identification')
+                ->count(),
             'filters' => [
                 'search' => $filters['search'] ?? '',
                 'already_won' => $filters['already_won'] ?? '',
-                'expected_to_win' => $filters['expected_to_win'] ?? '',
+                'raffle_identification' => $filters['raffle_identification'] ?? '',
             ],
             'importSummary' => session('importSummary'),
             'success' => session('success'),
@@ -52,10 +59,13 @@ class RaffleParticipantController extends Controller
     {
         $data = $request->validate([
             'raffle_number' => ['required', 'string', 'max:255', 'unique:raffle_participants,raffle_number'],
-            'expected_to_win' => ['required', 'boolean'],
+            'raffle_identification' => ['required', 'in:member,agency'],
         ]);
 
-        RaffleParticipant::query()->create($data);
+        DB::transaction(function () use ($data): void {
+            DB::table('raffle_draw_locks')->where('id', 1)->lockForUpdate()->firstOrFail();
+            RaffleParticipant::query()->create($data);
+        }, attempts: 3);
 
         return back()->with('success', 'Participant added.');
     }
@@ -64,9 +74,29 @@ class RaffleParticipantController extends Controller
     {
         $data = $request->validate([
             'raffle_number' => ['required', 'string', 'max:255', 'unique:raffle_participants,raffle_number,'.$participant->id],
+            'raffle_identification' => ['required', 'in:member,agency'],
         ]);
 
-        $participant->update($data);
+        $updated = DB::transaction(function () use ($data, $participant): bool {
+            DB::table('raffle_draw_locks')->where('id', 1)->lockForUpdate()->firstOrFail();
+
+            $lockedParticipant = RaffleParticipant::query()
+                ->whereKey($participant->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($lockedParticipant->already_won) {
+                return false;
+            }
+
+            $lockedParticipant->update($data);
+
+            return true;
+        }, attempts: 3);
+
+        if (! $updated) {
+            return back()->with('error', 'Winner records cannot be changed.');
+        }
 
         return back()->with('success', 'Participant updated.');
     }
@@ -97,37 +127,6 @@ class RaffleParticipantController extends Controller
         return back()->with('success', 'Participant deleted.');
     }
 
-    public function toggleExpected(RaffleParticipant $participant): RedirectResponse
-    {
-        $expectedToWin = DB::transaction(function () use ($participant): ?bool {
-            DB::table('raffle_draw_locks')->where('id', 1)->lockForUpdate()->firstOrFail();
-
-            $lockedParticipant = RaffleParticipant::query()
-                ->whereKey($participant->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            if ($lockedParticipant->already_won) {
-                return null;
-            }
-
-            $expectedToWin = ! $lockedParticipant->expected_to_win;
-            $lockedParticipant->update([
-                'expected_to_win' => $expectedToWin,
-            ]);
-
-            return $expectedToWin;
-        }, attempts: 3);
-
-        if ($expectedToWin === null) {
-            return back()->with('error', 'A participant who has already won cannot be marked as expected to win.');
-        }
-
-        return back()->with('success', $expectedToWin
-            ? 'Participant marked as expected to win.'
-            : 'Expected-to-win status removed.');
-    }
-
     public function resetWinners(): RedirectResponse
     {
         DB::transaction(function (): void {
@@ -137,12 +136,13 @@ class RaffleParticipantController extends Controller
                 ->where('already_won', true)
                 ->update([
                     'already_won' => false,
+                    'prize_position' => null,
                     'won_at' => null,
                     'updated_at' => now(),
                 ]);
         }, attempts: 3);
 
-        return back()->with('success', 'Raffle winners have been reset. Participants and expected-to-win settings were kept.');
+        return back()->with('success', 'Raffle winners have been reset. All participants were kept.');
     }
 
     public function clearAll(): RedirectResponse
@@ -177,9 +177,13 @@ class RaffleParticipantController extends Controller
 
             $header[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string) $header[0]);
 
-            if (count($header) !== 1 || trim((string) $header[0]) !== 'raffle_number') {
+            if (
+                count($header) !== 2
+                || trim((string) $header[0]) !== 'raffle_number'
+                || trim((string) $header[1]) !== 'raffle_identification'
+            ) {
                 throw ValidationException::withMessages([
-                    'file' => 'The CSV must contain exactly one column named raffle_number.',
+                    'file' => 'The CSV must contain raffle_number and raffle_identification columns.',
                 ]);
             }
 
@@ -201,18 +205,31 @@ class RaffleParticipantController extends Controller
         $seen = [];
 
         DB::transaction(function () use ($rows, &$summary, &$seen): void {
+            DB::table('raffle_draw_locks')->where('id', 1)->lockForUpdate()->firstOrFail();
+
             foreach ($rows as $row) {
-                if (count($row) !== 1 || ! is_string($row[0])) {
+                if (
+                    count($row) !== 2
+                    || ! is_string($row[0])
+                    || ! is_string($row[1])
+                ) {
                     $summary['invalid']++;
 
                     continue;
                 }
 
                 $raffleNumber = trim($row[0]);
+                $identification = strtolower(trim($row[1]));
 
                 $validation = Validator::make(
-                    ['raffle_number' => $raffleNumber],
-                    ['raffle_number' => ['required', 'string', 'max:255']],
+                    [
+                        'raffle_number' => $raffleNumber,
+                        'raffle_identification' => $identification,
+                    ],
+                    [
+                        'raffle_number' => ['required', 'string', 'max:255'],
+                        'raffle_identification' => ['required', 'in:member,agency'],
+                    ],
                 );
 
                 if ($validation->fails()) {
@@ -231,8 +248,9 @@ class RaffleParticipantController extends Controller
 
                 $inserted = DB::table('raffle_participants')->insertOrIgnore([
                     'raffle_number' => $raffleNumber,
+                    'raffle_identification' => $identification,
                     'already_won' => false,
-                    'expected_to_win' => false,
+                    'prize_position' => null,
                     'won_at' => null,
                     'created_at' => now(),
                     'updated_at' => now(),
@@ -259,8 +277,15 @@ class RaffleParticipantController extends Controller
             }
 
             try {
-                foreach (['raffle_number', '1001', '1002', '1003', '1004', '1005'] as $value) {
-                    if (fputcsv($output, [$value]) === false) {
+                foreach ([
+                    ['raffle_number', 'raffle_identification'],
+                    ['1001', 'member'],
+                    ['1002', 'agency'],
+                    ['1003', 'member'],
+                    ['1004', 'agency'],
+                    ['1005', 'member'],
+                ] as $row) {
+                    if (fputcsv($output, $row) === false) {
                         throw new RuntimeException('The CSV template could not be written.');
                     }
                 }

@@ -15,6 +15,8 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        $this->call(RafflePrizeSlotSeeder::class);
+
         User::query()->firstOrCreate(
             ['username' => 'admin123'],
             [

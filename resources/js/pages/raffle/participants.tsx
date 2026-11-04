@@ -19,16 +19,17 @@ import {
     resetWinners,
     store as storeParticipant,
     template as participantTemplate,
-    toggleExpected,
     update as updateParticipant,
 } from '@/actions/App/Http/Controllers/RaffleParticipantController';
+import { index as raffleSequenceIndex } from '@/actions/App/Http/Controllers/RaffleSequenceController';
 import InputError from '@/components/input-error';
 
 type Participant = {
     id: number;
     raffle_number: string;
+    raffle_identification: string | null;
     already_won: boolean;
-    expected_to_win: boolean;
+    prize_position: number | null;
     won_at: string | null;
 };
 
@@ -42,7 +43,7 @@ type ImportSummary = {
 type ParticipantFilters = {
     search: string;
     already_won: string;
-    expected_to_win: string;
+    raffle_identification: string;
 };
 
 type PaginationLink = {
@@ -61,6 +62,7 @@ type Props = {
     };
     filters: ParticipantFilters;
     importSummary: ImportSummary | null;
+    unassignedCount: number;
     success: string | null;
     error: string | null;
 };
@@ -72,6 +74,7 @@ function ParticipantRow({ participant }: { participant: Participant }) {
     const [editing, setEditing] = useState(false);
     const form = useForm({
         raffle_number: participant.raffle_number,
+        raffle_identification: participant.raffle_identification ?? '',
     });
 
     const save = (event: FormEvent<HTMLFormElement>) => {
@@ -112,6 +115,43 @@ function ParticipantRow({ participant }: { participant: Participant }) {
                 )}
             </td>
             <td className="px-4 py-4">
+                {editing ? (
+                    <select
+                        form={`edit-${participant.id}`}
+                        value={form.data.raffle_identification}
+                        onChange={(event) =>
+                            form.setData(
+                                'raffle_identification',
+                                event.target.value,
+                            )
+                        }
+                        required
+                        aria-label="Raffle identification"
+                        className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                    >
+                        <option value="" disabled>
+                            Select identification
+                        </option>
+                        <option value="member">Member</option>
+                        <option value="agency">Agency</option>
+                    </select>
+                ) : (
+                    <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+                        {participant.raffle_identification === null
+                            ? 'Unassigned'
+                            : participant.raffle_identification === 'agency'
+                              ? 'Agency'
+                              : 'Member'}
+                    </span>
+                )}
+                {editing && (
+                    <InputError
+                        message={form.errors.raffle_identification}
+                        className="mt-1"
+                    />
+                )}
+            </td>
+            <td className="px-4 py-4">
                 {participant.already_won ? (
                     <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
                         Yes
@@ -120,15 +160,6 @@ function ParticipantRow({ participant }: { participant: Participant }) {
                     <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
                         No
                     </span>
-                )}
-            </td>
-            <td className="px-4 py-4">
-                {participant.expected_to_win ? (
-                    <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">
-                        Yes
-                    </span>
-                ) : (
-                    <span className="text-sm text-slate-400">No</span>
                 )}
             </td>
             <td className="px-4 py-4">
@@ -157,55 +188,43 @@ function ParticipantRow({ participant }: { participant: Participant }) {
                         </>
                     ) : (
                         <>
-                            <button
-                                type="button"
-                                onClick={() => setEditing(true)}
-                                className={`${buttonClass} bg-slate-100 text-slate-700 hover:bg-slate-200`}
-                            >
-                                <Pencil className="size-3.5" />
-                                Edit
-                            </button>
-                            {!participant.already_won && (
-                                <button
-                                    type="button"
-                                    onClick={() =>
-                                        router.post(
-                                            toggleExpected.url(participant.id),
-                                            {},
-                                            { preserveScroll: true },
-                                        )
-                                    }
-                                    className={`${buttonClass} ${participant.expected_to_win ? 'bg-amber-50 text-amber-800 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
-                                >
-                                    {participant.expected_to_win
-                                        ? 'Cancel expected to win'
-                                        : 'Mark as expected to win'}
-                                </button>
-                            )}
                             {!participant.already_won ? (
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        if (
-                                            window.confirm(
-                                                `Delete participant ${participant.raffle_number}?`,
-                                            )
-                                        ) {
-                                            router.delete(
-                                                destroyParticipant.url(
-                                                    participant.id,
-                                                ),
-                                                { preserveScroll: true },
-                                            );
-                                        }
-                                    }}
-                                    className={`${buttonClass} bg-red-50 text-red-700 hover:bg-red-100`}
-                                >
-                                    Delete
-                                </button>
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditing(true)}
+                                        className={`${buttonClass} bg-slate-100 text-slate-700 hover:bg-slate-200`}
+                                    >
+                                        <Pencil className="size-3.5" />
+                                        Edit
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (
+                                                window.confirm(
+                                                    `Delete participant ${participant.raffle_number}?`,
+                                                )
+                                            ) {
+                                                router.delete(
+                                                    destroyParticipant.url(
+                                                        participant.id,
+                                                    ),
+                                                    { preserveScroll: true },
+                                                );
+                                            }
+                                        }}
+                                        className={`${buttonClass} bg-red-50 text-red-700 hover:bg-red-100`}
+                                    >
+                                        Delete
+                                    </button>
+                                </>
                             ) : (
                                 <span className="px-2 text-xs font-medium text-slate-400">
-                                    Permanent winner record
+                                    Winner record
+                                    {participant.prize_position !== null
+                                        ? ` · Prize #${participant.prize_position}`
+                                        : ''}
                                 </span>
                             )}
                         </>
@@ -220,10 +239,14 @@ export default function Participants({
     participants,
     filters,
     importSummary,
+    unassignedCount,
     success,
     error,
 }: Props) {
-    const addForm = useForm({ raffle_number: '', expected_to_win: false });
+    const addForm = useForm({
+        raffle_number: '',
+        raffle_identification: '',
+    });
     const importForm = useForm<{ file: File | null }>({ file: null });
     const filterForm = useForm(filters);
 
@@ -276,7 +299,7 @@ export default function Participants({
                                 onClick={() => {
                                     if (
                                         window.confirm(
-                                            'Reset the raffle? This will clear winner status and winning dates, but keep all participants and expected-to-win settings.',
+                                            'Reset the raffle? This will clear winner status, prize positions, and winning dates, but keep all participants.',
                                         )
                                     ) {
                                         router.post(
@@ -310,6 +333,12 @@ export default function Participants({
                                 <Trash2 className="size-4" />
                                 Clear all
                             </button>
+                            <Link
+                                href={raffleSequenceIndex.url()}
+                                className={`${buttonClass} text-slate-600 hover:bg-slate-100`}
+                            >
+                                Manage draw sequence
+                            </Link>
                             <button
                                 type="button"
                                 onClick={() => router.post('/logout')}
@@ -341,6 +370,17 @@ export default function Participants({
                             {error}
                         </p>
                     )}
+                    {unassignedCount > 0 && (
+                        <p
+                            role="status"
+                            className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900"
+                        >
+                            {unassignedCount} participant
+                            {unassignedCount === 1 ? ' needs' : 's need'} a
+                            raffle identification. Unassigned participants
+                            cannot be drawn.
+                        </p>
+                    )}
                     {importSummary && (
                         <section
                             role="status"
@@ -369,7 +409,7 @@ export default function Participants({
                         </div>
                         <form
                             onSubmit={addParticipant}
-                            className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end"
+                            className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,auto)_auto] sm:items-end"
                         >
                             <div>
                                 <label
@@ -397,20 +437,41 @@ export default function Participants({
                                     className="mt-1"
                                 />
                             </div>
-                            <label className="inline-flex items-center gap-2 pb-3 text-sm text-slate-700">
-                                <input
-                                    type="checkbox"
-                                    checked={addForm.data.expected_to_win}
+                            <div>
+                                <label
+                                    htmlFor="raffle_identification"
+                                    className="mb-2 block text-sm font-medium text-slate-700"
+                                >
+                                    Raffle identification
+                                </label>
+                                <select
+                                    id="raffle_identification"
+                                    value={addForm.data.raffle_identification}
                                     onChange={(event) =>
                                         addForm.setData(
-                                            'expected_to_win',
-                                            event.target.checked,
+                                            'raffle_identification',
+                                            event.target.value,
                                         )
                                     }
-                                    className="size-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                    required
+                                    className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                                >
+                                    <option value="" disabled>
+                                        Select identification
+                                    </option>
+                                    <option value="member">Member</option>
+                                    <option value="agency">Agency</option>
+                                    <option value="unassigned">
+                                        Unassigned
+                                    </option>
+                                </select>
+                                <InputError
+                                    message={
+                                        addForm.errors.raffle_identification
+                                    }
+                                    className="mt-1"
                                 />
-                                Expected to win
-                            </label>
+                            </div>
                             <button
                                 type="submit"
                                 disabled={addForm.processing}
@@ -429,8 +490,8 @@ export default function Participants({
                                     Import participants
                                 </h2>
                                 <p className="mt-1 text-sm text-slate-500">
-                                    Upload a CSV with a single raffle_number
-                                    column.
+                                    Upload a CSV with raffle_number and
+                                    raffle_identification columns.
                                 </p>
                             </div>
                             <a
@@ -521,21 +582,23 @@ export default function Participants({
                             </label>
                             <label className="block">
                                 <span className="mb-1.5 block text-sm font-medium text-slate-700">
-                                    Expected to win
+                                    Raffle identification
                                 </span>
                                 <select
-                                    value={filterForm.data.expected_to_win}
+                                    value={
+                                        filterForm.data.raffle_identification
+                                    }
                                     onChange={(event) =>
                                         filterForm.setData(
-                                            'expected_to_win',
+                                            'raffle_identification',
                                             event.target.value,
                                         )
                                     }
                                     className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                                 >
                                     <option value="">All</option>
-                                    <option value="yes">Yes</option>
-                                    <option value="no">No</option>
+                                    <option value="member">Member</option>
+                                    <option value="agency">Agency</option>
                                 </select>
                             </label>
                             <div className="flex items-end gap-2">
@@ -551,7 +614,7 @@ export default function Participants({
                                         filterForm.setData({
                                             search: '',
                                             already_won: '',
-                                            expected_to_win: '',
+                                            raffle_identification: '',
                                         });
                                         router.get(
                                             participantIndex.url(),
@@ -592,10 +655,10 @@ export default function Participants({
                                             Raffle number
                                         </th>
                                         <th className="px-4 py-3">
-                                            Already won?
+                                            Raffle identification
                                         </th>
                                         <th className="px-4 py-3">
-                                            Expected to win?
+                                            Already won?
                                         </th>
                                         <th className="px-4 py-3">Actions</th>
                                     </tr>
@@ -615,7 +678,8 @@ export default function Participants({
                                             >
                                                 {filterForm.data.search ||
                                                 filterForm.data.already_won ||
-                                                filterForm.data.expected_to_win
+                                                filterForm.data
+                                                    .raffle_identification
                                                     ? 'No participants match these search and filter options.'
                                                     : 'No participants yet. Add one above or import a CSV.'}
                                             </td>
