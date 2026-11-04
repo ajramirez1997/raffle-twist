@@ -1,6 +1,6 @@
 import { Head, router } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
-import { Dice5, Maximize, Minimize, Sparkles } from 'lucide-react';
+import { Dice5, Maximize, Minimize } from 'lucide-react';
 import { spin as spinRaffle } from '@/actions/App/Http/Controllers/RaffleController';
 
 type ConfettiPiece = {
@@ -20,8 +20,6 @@ type Props = {
         prize_position: number;
         raffle_identification: string;
     } | null;
-    completedDraws: number;
-    totalDraws: number;
     flash: {
         winner: {
             id: number;
@@ -33,15 +31,7 @@ type Props = {
     };
 };
 
-type DrawDetails = NonNullable<Props['nextDraw']>;
-
-export default function Raffle({
-    raffleNumbers,
-    nextDraw,
-    completedDraws,
-    totalDraws,
-    flash,
-}: Props) {
+export default function Raffle({ raffleNumbers, nextDraw, flash }: Props) {
     const [displayNumber, setDisplayNumber] = useState('');
     const [previousNumber, setPreviousNumber] = useState('');
     const [reelTick, setReelTick] = useState(0);
@@ -49,7 +39,6 @@ export default function Raffle({
     const [winnerNumber, setWinnerNumber] = useState<string | null>(null);
     const [confetti, setConfetti] = useState<ConfettiPiece[]>([]);
     const [spinning, setSpinning] = useState(false);
-    const [activeDraw, setActiveDraw] = useState<DrawDetails | null>(null);
     const [drawPhase, setDrawPhase] = useState<
         'ready' | 'spinning' | 'slowing'
     >('ready');
@@ -59,7 +48,6 @@ export default function Raffle({
     const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const winnerTarget = useRef<string | null>(null);
     const displayNumberRef = useRef('');
-    const audioContext = useRef<AudioContext | null>(null);
 
     useEffect(() => {
         const syncFullscreen = () => {
@@ -78,80 +66,6 @@ export default function Raffle({
         setDisplayNumber(number);
         setReelDuration(duration);
         setReelTick((tick) => tick + 1);
-    };
-
-    const playWinnerSound = () => {
-        const context = audioContext.current;
-
-        if (!context || context.state !== 'running') {
-            return;
-        }
-
-        const now = context.currentTime;
-        const notes = [
-            523.25, 659.25, 783.99, 1046.5, 783.99, 1046.5, 1318.51, 1567.98,
-        ];
-        const output = context.createGain();
-
-        output.gain.setValueAtTime(0.85, now);
-        output.connect(context.destination);
-
-        notes.forEach((frequency, index) => {
-            const startAt = now + index * 0.3;
-            const duration = index === notes.length - 1 ? 1.05 : 0.62;
-
-            [frequency, frequency * 2].forEach((tone, toneIndex) => {
-                const oscillator = context.createOscillator();
-                const gain = context.createGain();
-                const peak = toneIndex === 0 ? 0.3 : 0.09;
-
-                oscillator.type = 'triangle';
-                oscillator.frequency.setValueAtTime(tone, startAt);
-                gain.gain.setValueAtTime(0.0001, startAt);
-                gain.gain.exponentialRampToValueAtTime(peak, startAt + 0.035);
-                gain.gain.setValueAtTime(peak, startAt + duration * 0.55);
-                gain.gain.exponentialRampToValueAtTime(
-                    0.0001,
-                    startAt + duration,
-                );
-                oscillator.connect(gain);
-                gain.connect(output);
-                oscillator.start(startAt);
-                oscillator.stop(startAt + duration);
-            });
-        });
-
-        [
-            { startAt: 0, frequencies: [130.81, 164.81, 196] },
-            { startAt: 0.9, frequencies: [174.61, 220, 261.63] },
-            { startAt: 1.8, frequencies: [196, 246.94, 392] },
-        ].forEach(({ startAt, frequencies }) => {
-            frequencies.forEach((frequency, index) => {
-                const oscillator = context.createOscillator();
-                const gain = context.createGain();
-                const noteStart = now + startAt;
-
-                oscillator.type = index === 0 ? 'sine' : 'triangle';
-                oscillator.frequency.setValueAtTime(frequency, noteStart);
-                gain.gain.setValueAtTime(0.0001, noteStart);
-                gain.gain.exponentialRampToValueAtTime(
-                    index === 0 ? 0.16 : 0.09,
-                    noteStart + 0.06,
-                );
-                gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + 0.9);
-                oscillator.connect(gain);
-                gain.connect(output);
-                oscillator.start(noteStart);
-                oscillator.stop(noteStart + 0.9);
-            });
-        });
-
-        const totalDuration = (notes.length - 1) * 0.3 + 1.05;
-        output.gain.setValueAtTime(0.85, now + totalDuration - 0.1);
-        output.gain.exponentialRampToValueAtTime(
-            0.0001,
-            now + totalDuration + 0.1,
-        );
     };
 
     const toggleFullscreen = async () => {
@@ -207,25 +121,12 @@ export default function Raffle({
             return;
         }
 
-        setActiveDraw(nextDraw);
         winnerTarget.current = null;
         setWinnerNumber(null);
         setConfetti([]);
         setSpinError(null);
         setSpinning(true);
         setDrawPhase('spinning');
-
-        try {
-            audioContext.current ??= new AudioContext();
-
-            if (audioContext.current.state === 'suspended') {
-                void audioContext.current.resume().catch(() => {
-                    audioContext.current = null;
-                });
-            }
-        } catch {
-            audioContext.current = null;
-        }
 
         const accelerationDelays = [520, 420, 330, 260, 205, 160, 125, 100, 82];
         const slowdownDelays = [150, 230, 340];
@@ -259,7 +160,6 @@ export default function Raffle({
                         setWinnerNumber(winnerTarget.current);
                         setSpinning(false);
                         setDrawPhase('ready');
-                        playWinnerSound();
                     }, 650);
                     return;
                 }
@@ -311,39 +211,18 @@ export default function Raffle({
         roll();
     };
 
-    const displayedDraw: DrawDetails | null = spinning
-        ? activeDraw
-        : winnerNumber && flash.winner
-          ? {
-                spin_number: flash.winner.spin_number,
-                prize_position: flash.winner.prize_position,
-                raffle_identification: flash.winner.raffle_identification,
-            }
-          : nextDraw;
-
     return (
         <>
             <Head title="Raffle Draw" />
             <main
                 ref={mainRef}
-                className="raffle-curtain relative min-h-screen overflow-hidden text-white"
+                className="relative min-h-svh overflow-hidden bg-no-repeat text-white"
                 style={{
                     backgroundImage:
-                        'radial-gradient(ellipse at 50% 38%, rgba(255, 201, 88, 0.12), transparent 34%), linear-gradient(180deg, #26070e 0%, #100307 100%)',
+                        "url('/images/theater_marquee_background_1080p.jpg')",
+                    backgroundSize: '100% 100%',
                 }}
             >
-                <div
-                    aria-hidden="true"
-                    className="raffle-curtain-wall pointer-events-none absolute inset-0 z-0"
-                />
-                <div
-                    aria-hidden="true"
-                    className="raffle-curtain-panel raffle-curtain-panel-left pointer-events-none absolute inset-y-0 left-0 z-0 w-[18vw] max-w-64 min-w-20"
-                />
-                <div
-                    aria-hidden="true"
-                    className="raffle-curtain-panel raffle-curtain-panel-right pointer-events-none absolute inset-y-0 right-0 z-0 w-[18vw] max-w-64 min-w-20"
-                />
                 <button
                     type="button"
                     onClick={() => void toggleFullscreen()}
@@ -392,99 +271,77 @@ export default function Raffle({
                     }}
                 />
 
-                <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col items-center justify-center px-4 py-10 sm:px-6 sm:py-12">
-                    <section
-                        className={`relative w-full max-w-5xl sm:p-3`}
-                    >
-                        <div className="rounded-[1.6rem] border border-[#fff0b0]/80 bg-[#e8c45b] px-1 py-5 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] sm:px-8 sm:py-10">
-                            <div className="mx-auto mb-7 flex w-fit items-center gap-3 text-xs font-bold tracking-[0.25em] text-[#543408] uppercase">
-                                <Sparkles className="size-3.5" />
-                                {winnerNumber
-                                    ? 'Winning number'
-                                    : drawPhase === 'slowing'
-                                      ? 'Almost there'
-                                      : spinning
-                                        ? 'Drawing in progress'
-                                        : 'Your lucky number'}
-                                <Sparkles className="size-3.5" />
-                            </div>
+                <div className="absolute inset-x-0 top-0 bottom-24 z-10 flex translate-y-3 items-center justify-center px-4 text-center sm:bottom-28 sm:translate-y-5 sm:px-6">
+                    <section className="flex w-full max-w-5xl flex-col items-center gap-6 sm:gap-8">
+                        <div
+                            aria-hidden="true"
+                            className="h-5 shrink-0 sm:h-6"
+                        />
 
-                            <div className="raffle-number-display relative mx-auto h-48 max-w-4xl overflow-hidden rounded-2xl border border-amber-200/50 bg-[#090603] px-4 shadow-[inset_0_2px_30px_rgba(0,0,0,0.85),0_0_45px_rgba(245,190,75,0.14)] sm:h-64 sm:px-9">
+                        <div className="raffle-number-display relative h-[clamp(11rem,45svh,31rem)] w-full max-w-4xl overflow-hidden">
+                            {spinning ? (
                                 <div
-                                    aria-hidden="true"
-                                    className="absolute inset-x-7 top-0 h-px bg-gradient-to-r from-transparent via-amber-100/70 to-transparent"
-                                />
-                                {spinning ? (
-                                    <div
-                                        key={reelTick}
-                                        aria-live="polite"
-                                        className="raffle-number-reel-track absolute inset-x-0 top-0 z-10 flex h-[200%] flex-col"
-                                        style={{
-                                            animationDuration: `${reelDuration}ms`,
-                                        }}
-                                    >
-                                        {[previousNumber, displayNumber].map(
-                                            (number, index) => (
-                                                <span
-                                                    key={`${reelTick}-${index}`}
-                                                    className="flex h-1/2 w-full shrink-0 items-center justify-center px-3 text-center font-mono text-6xl leading-none font-bold tracking-[0.08em] break-all text-amber-100 sm:text-8xl lg:text-9xl"
-                                                >
-                                                    {number}
-                                                </span>
-                                            ),
-                                        )}
-                                    </div>
-                                ) : (
-                                    <span
-                                        aria-live="polite"
-                                        className={`absolute inset-0 z-10 flex items-center justify-center px-3 text-center font-mono text-6xl leading-none font-bold tracking-[0.08em] break-all text-amber-100 sm:text-8xl lg:text-9xl ${winnerNumber ? 'drop-shadow-[0_0_24px_rgba(255,211,115,0.65)]' : ''}`}
-                                    >
-                                        {displayNumber}
-                                    </span>
-                                )}
-                                <div
-                                    aria-hidden="true"
-                                    className="absolute inset-x-7 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-100/55 to-transparent"
-                                />
-                            </div>
-
-                            {spinError && (
-                                <p
-                                    role="alert"
-                                    className="mt-5 text-sm font-medium text-rose-300"
+                                    key={reelTick}
+                                    aria-live="polite"
+                                    className="raffle-number-reel-track absolute inset-x-0 top-0 z-10 flex h-[200%] flex-col"
+                                    style={{
+                                        animationDuration: `${reelDuration}ms`,
+                                    }}
                                 >
-                                    {spinError}
-                                </p>
+                                    {[previousNumber, displayNumber].map(
+                                        (number, index) => (
+                                            <span
+                                                key={`${reelTick}-${index}`}
+                                                className="flex h-1/2 w-full shrink-0 items-center justify-center px-3 text-center font-mono text-[clamp(3.5rem,15vw,14rem)] leading-none font-bold tracking-[0.08em] break-all text-amber-100"
+                                            >
+                                                {number}
+                                            </span>
+                                        ),
+                                    )}
+                                </div>
+                            ) : (
+                                <span
+                                    aria-live="polite"
+                                    className={`absolute inset-0 z-10 flex items-center justify-center px-3 text-center font-mono text-[clamp(3.5rem,15vw,14rem)] leading-none font-bold tracking-[0.08em] break-all text-amber-100 ${winnerNumber ? 'drop-shadow-[0_0_24px_rgba(255,211,115,0.65)]' : ''}`}
+                                >
+                                    {displayNumber}
+                                </span>
                             )}
-
-                            <button
-                                type="button"
-                                onClick={startSpin}
-                                disabled={
-                                    spinning ||
-                                    raffleNumbers.length === 0 ||
-                                    nextDraw === null
-                                }
-                                className="mt-8 inline-flex min-h-14 items-center justify-center gap-3 rounded-xl border border-[#ffc3b5] bg-[#dc2626] px-10 py-4 text-lg font-bold tracking-wide text-white shadow-[0_8px_30px_rgba(192,24,36,0.45)] transition hover:bg-[#b91c1c] hover:shadow-[0_12px_42px_rgba(220,32,45,0.62)] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-72"
-                            >
-                                <Dice5
-                                    className={`size-5 ${spinning ? 'animate-spin' : ''}`}
-                                />
-                                {spinning
-                                    ? drawPhase === 'slowing'
-                                        ? 'Almost there…'
-                                        : 'Numbers are rolling…'
-                                    : nextDraw === null
-                                      ? 'Raffle draws complete'
-                                      : 'Spin the raffle'}
-                            </button>
-
-                            <div className="mt-8 border-t border-[#6e480e]/30 pt-5 text-base font-semibold tracking-wide text-[#543408]">
-                                Good luck to all participants!
-                            </div>
                         </div>
+
+                        {spinError && (
+                            <p
+                                role="alert"
+                                className="text-sm font-medium text-rose-200 drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]"
+                            >
+                                {spinError}
+                            </p>
+                        )}
                     </section>
                 </div>
+                <footer className="absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+                    <button
+                        type="button"
+                        onClick={startSpin}
+                        disabled={
+                            spinning ||
+                            raffleNumbers.length === 0 ||
+                            nextDraw === null
+                        }
+                        className="inline-flex min-h-14 items-center justify-center gap-3 rounded-xl border border-[#ffc3b5] bg-[#dc2626] px-10 py-4 text-lg font-bold tracking-wide text-white shadow-[0_8px_30px_rgba(192,24,36,0.45)] transition hover:bg-[#b91c1c] hover:shadow-[0_12px_42px_rgba(220,32,45,0.62)] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-72"
+                    >
+                        <Dice5
+                            className={`size-5 ${spinning ? 'animate-spin' : ''}`}
+                        />
+                        {spinning
+                            ? drawPhase === 'slowing'
+                                ? 'Almost there…'
+                                : 'Numbers are rolling…'
+                            : nextDraw === null
+                              ? 'Raffle draws complete'
+                              : 'Spin the raffle'}
+                    </button>
+                </footer>
             </main>
         </>
     );
